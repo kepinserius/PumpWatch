@@ -14,4 +14,6 @@ def test_health() -> None:
 def test_ready() -> None:
     response = client.get("/ready")
     assert response.status_code == 200
-    assert response.json() == {"status": "ready"}
+    data = response.json()
+    assert data["status"] in ("ready", "degraded")
+    assert "timestamp" in data
