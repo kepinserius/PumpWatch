@@ -1,9 +1,7 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from pumpwatch.domain.models import MarketData
+import pytest
+
 from pumpwatch.domain.risk import RiskAssessment, RiskFlag
 from pumpwatch.domain.scoring import MomentumScore, ScoreComponent
 from pumpwatch.services.alerts import TelegramAlert
@@ -14,7 +12,7 @@ def mock_score():
     return MomentumScore(
         token_address="So11111111111111111111111111111111111111112",
         chain="solana",
-        calculated_at=datetime.now(timezone.utc),
+        calculated_at=datetime.now(UTC),
         total_score=75,
         components=[
             ScoreComponent("volume_growth", 0.8, 0.25, {"available": True}),
@@ -30,7 +28,7 @@ def mock_risk():
     return RiskAssessment(
         token_address="So11111111111111111111111111111111111111112",
         chain="solana",
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
         risk_level="low",
         hard_block=False,
         flags=[
@@ -40,7 +38,7 @@ def mock_risk():
                 severity="high",
                 reason="Liquidity acceptable",
                 source="market_data",
-                checked_at=datetime.now(timezone.utc),
+                checked_at=datetime.now(UTC),
             )
         ],
         coverage=1.0,

@@ -1,8 +1,11 @@
 import logging
+from datetime import UTC, datetime
 
 import asyncpg
 
 from pumpwatch.domain.models import MarketData, TokenInfo
+from pumpwatch.domain.risk import RiskAssessment
+from pumpwatch.domain.scoring import MomentumScore
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,9 @@ class Database:
             )
             return row["id"] if row else None
 
-    async def insert_snapshot(self, data: MarketData, token_id: int | None, pool_id: int | None) -> int | None:
+    async def insert_snapshot(
+        self, data: MarketData, token_id: int | None, pool_id: int | None
+    ) -> int | None:
         if not self.pool:
             return None
         async with self.pool.acquire() as conn:
@@ -106,6 +111,74 @@ class Database:
                 data.sells_24h,
                 data.raw_data,
                 data.data_quality_status,
+            )
+            return row["id"] if row else None
+
+    async def insert_signal(
+        self,
+        token_id: int,
+        pool_id: int | None,
+        score: MomentumScore,
+        risk: RiskAssessment,
+        entry_price: float | None,
+    ) -> int | None:
+        if not self.pool:
+            return None
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO signals (
+                    token_id, pool_id, created_at, score,
+                    score_components_json, feature_snapshot_json,
+                    risk_assessment_json, rules_version, entry_price_usd
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id
+                """,
+                token_id,
+                pool_id,
+                datetime.now(UTC),
+                score.total_score,
+                {
+                    "components": [
+                        {"name": c.name, "score": c.score, "weight": c.weight, "details": c.details}
+                        for c in score.components
+                    ],
+                    "data_coverage": score.data_coverage,
+                },
+                score.features,
+                {
+                    "risk_level": risk.risk_level,
+                    "hard_block": risk.hard_block,
+                    "flags": [
+                        {
+                            "name": f.name,
+                            "status": f.status,
+                            "severity": f.severity,
+                            "reason": f.reason,
+                        }
+                        for f in risk.flags
+                    ],
+                    "coverage": risk.coverage,
+                },
+                score.rules_version,
+                entry_price,
+            )
+            return row["id"] if row else None
+
+    async def insert_alert(self, signal_id: int, channel: str, dedupe_key: str) -> int | None:
+        if not self.pool:
+            return None
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO alerts (signal_id, channel, dedupe_key, sent_at, status)
+                VALUES ($1, $2, $3, NOW(), 'sent')
+                ON CONFLICT (dedupe_key) DO NOTHING
+                RETURNING id
+                """,
+                signal_id,
+                channel,
+                dedupe_key,
             )
             return row["id"] if row else None
 

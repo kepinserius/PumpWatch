@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from pumpwatch.config import settings
 from pumpwatch.database import Database
@@ -47,7 +47,7 @@ class AlertService:
         if not self.db.pool:
             return False
 
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.cooldown_minutes)
+        cutoff = datetime.now(UTC) - timedelta(minutes=self.cooldown_minutes)
         async with self.db.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -64,8 +64,35 @@ class AlertService:
             )
             return row is not None
 
-    async def _record_signal(self, data: MarketData, score: any, risk: any) -> None:
-        pass
+    async def _record_signal(self, data: MarketData, score: MomentumScore, risk: RiskAssessment) -> int | None:
+        token_id = await self.db.get_token_id(data.chain, data.token_address)
+        if not token_id:
+            return None
+
+        pool_id = None
+        if data.pool_address:
+            pool_id = await self.db.get_pool_id(data.chain, data.pool_address)
+
+        entry_price = float(data.price_usd) if data.price_usd else None
+        signal_id = await self.db.insert_signal(token_id, pool_id, score, risk, entry_price)
+        return signal_id
 
     async def _update_cooldown(self, chain: str, address: str) -> None:
-        pass
+        token_id = await self.db.get_token_id(chain, address)
+        if not token_id:
+            return
+
+        signal_id = await self._get_latest_signal_id(token_id)
+        if signal_id:
+            dedupe_key = f"{chain}:{address}:{datetime.now(timezone.utc).date()}"
+            await self.db.insert_alert(signal_id, "telegram", dedupe_key)
+
+    async def _get_latest_signal_id(self, token_id: int) -> int | None:
+        if not self.db.pool:
+            return None
+        async with self.db.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id FROM signals WHERE token_id = $1 ORDER BY created_at DESC LIMIT 1",
+                token_id,
+            )
+            return row["id"] if row else None

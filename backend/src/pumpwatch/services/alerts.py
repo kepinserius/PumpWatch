@@ -1,6 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 import httpx
 
@@ -57,16 +56,16 @@ class TelegramAlert:
         risk_emoji = "🟢" if risk.risk_level == "low" else "🟡" if risk.risk_level == "medium" else "🔴"
 
         lines = [
-            f"🚀 *PumpWatch Alert*",
-            f"",
+            "🚀 *PumpWatch Alert*",
+            "",
             f"*Token:* `{token_address[:16]}...`",
             f"*Chain:* {chain.upper()}",
-            f"",
+            "",
             f"*Momentum Score:* {score.total_score}/100 — {category}",
             f"*Risk Level:* {risk_emoji} {risk.risk_level.upper()}",
             f"*Data Coverage:* {score.data_coverage * 100:.0f}%",
-            f"",
-            f"*Top Components:*",
+            "",
+            "*Top Components:*",
         ]
 
         sorted_components = sorted(score.components, key=lambda c: c.score * c.weight, reverse=True)[
@@ -78,13 +77,13 @@ class TelegramAlert:
         if risk.flags:
             failed = [f for f in risk.flags if f.status == "fail"]
             if failed:
-                lines.append(f"")
-                lines.append(f"⚠️ *Risk Flags:*")
+                lines.append("")
+                lines.append("⚠️ *Risk Flags:*")
                 for flag in failed[:3]:
                     lines.append(f"• {flag.reason}")
 
-        lines.append(f"")
-        lines.append(f"_Last updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_")
+        lines.append("")
+        lines.append(f"_Last updated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}_")
 
         return "\n".join(lines)
 

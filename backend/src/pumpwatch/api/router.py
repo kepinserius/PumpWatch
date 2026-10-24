@@ -108,3 +108,62 @@ async def get_snapshots(chain: str, address: str, limit: int = 20):
             limit,
         )
         return [dict(row) for row in rows]
+
+
+@router.get("/signals")
+async def list_signals(
+    chain: str | None = None, status: str | None = None, limit: int = 50, offset: int = 0
+):
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT s.id, s.created_at, s.score, s.status, s.entry_price_usd,
+                   t.chain, t.address, t.symbol, t.name
+            FROM signals s
+            JOIN tokens t ON s.token_id = t.id
+            WHERE ($1 IS NULL OR t.chain = $1)
+            AND ($2 IS NULL OR s.status = $2)
+            ORDER BY s.created_at DESC
+            LIMIT $3 OFFSET $4
+            """,
+            chain,
+            status,
+            limit,
+            offset,
+        )
+        return [dict(row) for row in rows]
+
+
+@router.get("/signals/{signal_id}")
+async def get_signal(signal_id: int):
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT s.*, t.chain, t.address, t.symbol, t.name
+            FROM signals s
+            JOIN tokens t ON s.token_id = t.id
+            WHERE s.id = $1
+            """,
+            signal_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Signal not found")
+        return dict(row)
+
+
+@router.get("/signals/{signal_id}/outcome")
+async def get_signal_outcome(signal_id: int):
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM signal_outcomes WHERE signal_id = $1",
+            signal_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Outcome not found")
+        return dict(row)
