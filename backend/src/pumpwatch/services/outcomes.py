@@ -1,8 +1,7 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from pumpwatch.config import settings
 from pumpwatch.database import Database
 from pumpwatch.providers.dexscreener import DexScreenerAdapter
 
@@ -43,10 +42,10 @@ class OutcomeTracker:
         if not self.db.pool:
             return []
 
-        cutoff = datetime.now(timezone.utc) - delta
+        cutoff = datetime.now(UTC) - delta
         async with self.db.pool.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT s.id, s.token_id, s.created_at, s.entry_price_usd,
                        t.chain, t.address
                 FROM signals s
@@ -55,9 +54,9 @@ class OutcomeTracker:
                 AND s.entry_price_usd IS NOT NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM signal_outcomes o
-                    WHERE o.signal_id = s.id AND o.price_{} IS NOT NULL
+                    WHERE o.signal_id = s.id AND o.price_{horizon} IS NOT NULL
                 )
-                """.format(horizon),
+                """,
                 cutoff,
             )
             return [dict(row) for row in rows]
