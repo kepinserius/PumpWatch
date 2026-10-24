@@ -167,3 +167,25 @@ async def get_signal_outcome(signal_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Outcome not found")
         return dict(row)
+
+
+@router.get("/paper-trades")
+async def list_paper_trades(limit: int = 100):
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    from pumpwatch.services.paper_trade import PaperTrader
+
+    trader = PaperTrader(db)
+    trades = await trader.get_trade_history(limit)
+    return trades
+
+
+@router.get("/paper-trades/open")
+async def list_open_positions():
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    from pumpwatch.services.paper_trade import PaperTrader
+
+    trader = PaperTrader(db)
+    positions = await trader.get_open_positions()
+    return positions

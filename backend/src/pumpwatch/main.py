@@ -1,8 +1,8 @@
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from pumpwatch.api.router import init_router, router
 from pumpwatch.config import settings
@@ -56,7 +56,7 @@ async def ready() -> dict[str, Any]:
     return {
         "status": "ready" if db_status == "connected" else "degraded",
         "database": db_status,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -67,16 +67,19 @@ async def providers_health() -> dict[str, Any]:
         "provider": "dexscreener",
         "status": "healthy" if is_healthy else "unhealthy",
         "message": message,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @app.post("/api/v1/admin/scan")
-async def trigger_scan(chain: str = "solana") -> dict[str, Any]:
+async def trigger_scan(chain: str = "solana", api_key: str = "") -> dict[str, Any]:
+    if settings.admin_api_key and api_key != settings.admin_api_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
     logger.info(f"Manual scan triggered for chain: {chain}")
     count = await ingestion.scan_and_ingest(chain)
     return {
         "chain": chain,
         "tokens_ingested": count,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
