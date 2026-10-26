@@ -1,29 +1,45 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
+from pumpwatch.config import settings
 from pumpwatch.database import Database
 from pumpwatch.providers.dexscreener import DexScreenerAdapter
 from pumpwatch.services.ingestion import IngestionService
-from pumpwatch.services.risk import RiskEngine
-from pumpwatch.services.scoring import MomentumEngine
 
 router = APIRouter()
 
-db: Database | None = None
-provider: DexScreenerAdapter | None = None
-ingestion: IngestionService | None = None
+_db: Database | None = None
+_provider: DexScreenerAdapter | None = None
+_ingestion: IngestionService | None = None
 
 
-def init_router(database: Database, prov: DexScreenerAdapter, ing: IngestionService) -> None:
-    global db, provider, ingestion
-    db = database
-    provider = prov
-    ingestion = ing
+async def _get_db() -> Database:
+    global _db
+    if not _db:
+        _db = Database(settings.database_url)
+        await _db.connect()
+    return _db
+
+
+async def _get_provider() -> DexScreenerAdapter:
+    global _provider
+    if not _provider:
+        _provider = DexScreenerAdapter()
+    return _provider
+
+
+async def _get_ingestion() -> IngestionService:
+    global _ingestion
+    if not _ingestion:
+        db = await _get_db()
+        provider = await _get_provider()
+        _ingestion = IngestionService(db, provider)
+    return _ingestion
 
 
 @router.get("/tokens")
 async def list_tokens(chain: str | None = None, limit: int = 50, offset: int = 0):
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     async with db.pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -46,8 +62,7 @@ async def list_tokens(chain: str | None = None, limit: int = 50, offset: int = 0
 
 @router.get("/tokens/{chain}/{address}")
 async def get_token(chain: str, address: str):
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     async with db.pool.acquire() as conn:
         token = await conn.fetchrow(
             "SELECT * FROM tokens WHERE chain = $1 AND address = $2",
@@ -61,11 +76,13 @@ async def get_token(chain: str, address: str):
 
 @router.get("/tokens/{chain}/{address}/score")
 async def get_token_score(chain: str, address: str):
-    if not provider:
-        raise HTTPException(status_code=503, detail="Provider not initialized")
+    provider = await _get_provider()
     data = await provider.fetch_market_data(chain, address)
     if not data:
         raise HTTPException(status_code=404, detail="Market data not found")
+
+    from pumpwatch.services.risk import RiskEngine
+    from pumpwatch.services.scoring import MomentumEngine
 
     risk_engine = RiskEngine()
     risk = risk_engine.assess(data)
@@ -91,8 +108,7 @@ async def get_token_score(chain: str, address: str):
 
 @router.get("/tokens/{chain}/{address}/snapshots")
 async def get_snapshots(chain: str, address: str, limit: int = 20):
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     async with db.pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -114,8 +130,7 @@ async def get_snapshots(chain: str, address: str, limit: int = 20):
 async def list_signals(
     chain: str | None = None, status: str | None = None, limit: int = 50, offset: int = 0
 ):
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     async with db.pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -138,8 +153,7 @@ async def list_signals(
 
 @router.get("/signals/{signal_id}")
 async def get_signal(signal_id: int):
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     async with db.pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -157,8 +171,7 @@ async def get_signal(signal_id: int):
 
 @router.get("/signals/{signal_id}/outcome")
 async def get_signal_outcome(signal_id: int):
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     async with db.pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM signal_outcomes WHERE signal_id = $1",
@@ -171,8 +184,7 @@ async def get_signal_outcome(signal_id: int):
 
 @router.get("/paper-trades")
 async def list_paper_trades(limit: int = 100):
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     from pumpwatch.services.paper_trade import PaperTrader
 
     trader = PaperTrader(db)
@@ -182,8 +194,7 @@ async def list_paper_trades(limit: int = 100):
 
 @router.get("/paper-trades/open")
 async def list_open_positions():
-    if not db:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+    db = await _get_db()
     from pumpwatch.services.paper_trade import PaperTrader
 
     trader = PaperTrader(db)

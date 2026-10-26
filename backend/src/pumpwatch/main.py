@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 
-from pumpwatch.api.router import init_router, router
+from pumpwatch.api.router import router
 from pumpwatch.config import settings
 from pumpwatch.database import Database
 from pumpwatch.logging_config import setup_logging
@@ -20,8 +20,6 @@ provider = DexScreenerAdapter()
 ingestion = IngestionService(db, provider)
 
 app = FastAPI(title="PumpWatch API", version="0.1.0")
-
-init_router(db, provider, ingestion)
 app.include_router(router, prefix="/api/v1")
 
 
