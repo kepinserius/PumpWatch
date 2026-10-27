@@ -133,6 +133,9 @@ app.include_router(archiver_router, prefix="/api/v1", tags=["archiver"])
 from pumpwatch.api.alert_rules_router import router as alert_rules_router
 app.include_router(alert_rules_router, prefix="/api/v1", tags=["alert-rules"])
 
+from pumpwatch.api.analytics_router import router as analytics_router
+app.include_router(analytics_router, prefix="/api/v1", tags=["analytics"])
+
 
 @app.get("/health")
 async def health() -> dict[str, str]:
