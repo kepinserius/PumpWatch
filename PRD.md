@@ -1,8 +1,8 @@
 # PRD --- Memecoin Momentum & Risk Scanner
 
 **Nama kerja:** PumpWatch (nama sementara)\
-**Versi dokumen:** 1.0\
-**Status:** Draft untuk implementasi MVP\
+**Versi dokumen:** 2.0\
+**Status:** Updated untuk Post-MVP features\
 **Tujuan utama:** Membantu pengguna menemukan dan mengevaluasi token
 memecoin yang menunjukkan momentum awal, sambil menampilkan risiko
 secara transparan. Sistem bukan peramal harga dan tidak menjamin profit.
@@ -639,20 +639,20 @@ menurut usia pool, likuiditas, dan kondisi pasar.
 -   Kriteria selesai: alert dapat ditelusuri ke snapshot dan rules
     version.
 
-### Phase 4 --- History + backtest
+### Phase 4 --- History + backtest (SELESAI)
 
 -   Rekam outcome pada horizon terpilih.
 -   Implementasikan simulasi biaya/slippage dan laporan hasil.
 -   Kriteria selesai: laporan mencakup sinyal gagal, missing outcomes,
     sample size, dan limitations.
+-   **Implemented:** Historical archive, backtesting engine, analytics
 
-### Phase 5 --- Paper trading dan hardening
+### Phase 5 --- Advanced alerts + analytics (SELESAI)
 
--   Simulasikan entry/exit tanpa transaksi on-chain.
--   Uji recovery saat API/database/Telegram gagal.
--   Lakukan security review dan dokumentasi deployment.
--   Kriteria selesai: tidak ada transaksi nyata, semua secret
-    terlindungi, dan metrik kualitas dapat diaudit.
+-   Alert rules per-token & global, cooldown per pair
+-   Dashboard analytics dengan momentum/risk trends
+-   Kriteria selesai: alert rules CRUD, analytics endpoints, frontend UI
+-   **Implemented:** AlertManager, AnalyticsService, frontend settings
 
 ### Phase 6 --- Pertimbangkan ekspansi
 
