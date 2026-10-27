@@ -12,8 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 class DexScreenerAdapter:
+    # DexScreener punya dua basis URL:
+    # - /latest/dex/* → untuk data pair & token
+    # - /* (root) → untuk token-profiles, token-boosts, dsb
+    DEXSCREENER_ROOT = "https://api.dexscreener.com"
+
     def __init__(self) -> None:
-        self.base_url = settings.dex_screener_api_url
+        self.base_url = settings.dex_screener_api_url  # e.g. https://api.dexscreener.com/latest
         self.timeout = settings.request_timeout
         self.rate_limit_delay = settings.rate_limit_delay
 
@@ -31,36 +36,73 @@ class DexScreenerAdapter:
             logger.error(f"Request error fetching {url}: {e}")
             return None
 
+    async def _fetch_list(self, client: httpx.AsyncClient, path: str) -> list[Any] | None:
+        """Fetch endpoint yang mengembalikan JSON array."""
+        url = f"{self.base_url}{path}"
+        try:
+            response = await client.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            raw = response.json()
+            return raw if isinstance(raw, list) else None
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"HTTP error fetching {url}: {e.response.status_code}")
+            return None
+        except httpx.RequestError as e:
+            logger.error(f"Request error fetching {url}: {e}")
+            return None
+
     async def fetch_new_pairs(self, chain: str, limit: int = 50) -> list[TokenInfo]:
+        """
+        Fetch recently active tokens dari DexScreener token-profiles endpoint.
+        Endpoint: GET https://api.dexscreener.com/token-profiles/latest/v1
+        (Beda basis dari /latest/dex/* — tidak pakai self.base_url)
+        """
+        url = f"{self.DEXSCREENER_ROOT}/token-profiles/latest/v1"
         async with httpx.AsyncClient() as client:
-            data = await self._fetch(client, f"/dex/pairs/{chain}")
-            if not data or "pairs" not in data:
+            try:
+                response = await client.get(url, timeout=self.timeout)
+                response.raise_for_status()
+                data = response.json()
+            except Exception as e:
+                logger.warning(f"fetch_new_pairs error: {e}")
                 return []
 
-            pairs = data["pairs"][:limit]
-            result: list[TokenInfo] = []
-            for pair in pairs:
-                if not pair.get("baseToken") or not pair["baseToken"].get("address"):
-                    continue
-                info = TokenInfo(
-                    chain=chain.lower(),
-                    address=pair["baseToken"]["address"],
-                    symbol=pair["baseToken"].get("symbol"),
-                    name=pair["baseToken"].get("name"),
-                    pool_address=pair.get("pairAddress"),
-                    dex_id=pair.get("dexId"),
-                    pool_created_at=self._parse_timestamp(pair.get("pairCreatedAt")),
+            if not isinstance(data, list):
+                logger.warning(f"fetch_new_pairs: unexpected response type {type(data)}")
+                return []
+
+            chain_lower = chain.lower()
+            filtered = [
+                item for item in data
+                if item.get("chainId", "").lower() == chain_lower
+                and item.get("tokenAddress")
+            ][:limit]
+
+            logger.info(f"fetch_new_pairs: {len(filtered)} {chain} tokens dari token-profiles")
+
+            return [
+                TokenInfo(
+                    chain=chain_lower,
+                    address=item["tokenAddress"],
+                    symbol=None,
+                    name=None,
+                    pool_address=None,
+                    dex_id=None,
+                    pool_created_at=None,
                 )
-                result.append(info)
-            return result
+                for item in filtered
+            ]
+
 
     async def fetch_market_data(self, chain: str, address: str) -> MarketData | None:
         async with httpx.AsyncClient() as client:
             data = await self._fetch(client, f"/dex/tokens/{address}")
-            if not data or "pairs" not in data or len(data["pairs"]) == 0:
+            if not data:
                 return None
-
-            pair = data["pairs"][0]
+            pairs = data.get("pairs") or []
+            if not pairs:
+                return None
+            pair = pairs[0]
             return self._parse_pair_to_market_data(pair, chain, address)
 
     async def health_check(self) -> tuple[bool, str]:

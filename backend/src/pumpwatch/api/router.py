@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.concurrency import run_in_threadpool
 
 from pumpwatch.config import settings
 from pumpwatch.database import Database
@@ -48,7 +47,7 @@ async def list_tokens(chain: str | None = None, limit: int = 50, offset: int = 0
                    COUNT(ms.id) as snapshot_count
             FROM tokens t
             LEFT JOIN market_snapshots ms ON t.id = ms.token_id
-            WHERE ($1 IS NULL OR t.chain = $1)
+            WHERE ($1::varchar IS NULL OR t.chain = $1)
             GROUP BY t.id
             ORDER BY last_seen DESC NULLS LAST
             LIMIT $2 OFFSET $3
@@ -65,7 +64,7 @@ async def get_token(chain: str, address: str):
     db = await _get_db()
     async with db.pool.acquire() as conn:
         token = await conn.fetchrow(
-            "SELECT * FROM tokens WHERE chain = $1 AND address = $2",
+            "SELECT * FROM tokens WHERE chain = $1::varchar AND address = $2::varchar",
             chain,
             address,
         )
@@ -115,7 +114,7 @@ async def get_snapshots(chain: str, address: str, limit: int = 20):
             SELECT ms.*, t.address as token_address
             FROM market_snapshots ms
             JOIN tokens t ON ms.token_id = t.id
-            WHERE t.chain = $1 AND t.address = $2
+            WHERE t.chain = $1::varchar AND t.address = $2::varchar
             ORDER BY ms.observed_at DESC
             LIMIT $3
             """,
@@ -138,8 +137,8 @@ async def list_signals(
                    t.chain, t.address, t.symbol, t.name
             FROM signals s
             JOIN tokens t ON s.token_id = t.id
-            WHERE ($1 IS NULL OR t.chain = $1)
-            AND ($2 IS NULL OR s.status = $2)
+            WHERE ($1::varchar IS NULL OR t.chain = $1)
+            AND ($2::varchar IS NULL OR s.status = $2)
             ORDER BY s.created_at DESC
             LIMIT $3 OFFSET $4
             """,
