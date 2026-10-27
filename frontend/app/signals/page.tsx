@@ -191,7 +191,7 @@ function SignalDetailPanel({ signal }: { signal: Signal }) {
 
         {/* Disclaimer */}
         <div style={{ marginTop: '16px', padding: '10px 12px', background: '#1c1f2e', borderRadius: '6px', fontSize: '11px', color: '#555b6e', lineHeight: '1.5' }}>
-          ⚠️ Skor bukan prediksi. Return aktual bisa berbeda signifikan. Ini adalah alat riset, bukan rekomendasi transaksi.
+          WARNING: Skor bukan prediksi. Return aktual bisa berbeda signifikan. Ini adalah alat riset, bukan rekomendasi transaksi.
         </div>
       </div>
     </div>
@@ -243,7 +243,6 @@ export default function SignalsPage() {
           <div style={{ color: '#555b6e', textAlign: 'center', padding: '64px' }}>Memuat signals…</div>
         ) : !signals || signals.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '64px 24px', background: '#141720', border: '1px solid #252836', borderRadius: '12px' }}>
-            <div style={{ fontSize: '40px', marginBottom: '16px' }}>📊</div>
             <div style={{ color: '#e8eaf0', fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>Belum ada signal</div>
             <div style={{ color: '#8b90a0', fontSize: '13px' }}>
               Signal muncul saat token memenuhi threshold momentum setelah scan berjalan.

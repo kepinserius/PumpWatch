@@ -53,16 +53,16 @@ class TelegramAlert:
         self, token_address: str, chain: str, score: MomentumScore, risk: RiskAssessment
     ) -> str:
         category = self._get_category(score.total_score)
-        risk_emoji = "🟢" if risk.risk_level == "low" else "🟡" if risk.risk_level == "medium" else "🔴"
+        risk_indicator = "LOW" if risk.risk_level == "low" else "MED" if risk.risk_level == "medium" else "HIGH"
 
         lines = [
-            "🚀 *PumpWatch Alert*",
+            "*PumpWatch Alert*",
             "",
             f"*Token:* `{token_address[:16]}...`",
             f"*Chain:* {chain.upper()}",
             "",
             f"*Momentum Score:* {score.total_score}/100 — {category}",
-            f"*Risk Level:* {risk_emoji} {risk.risk_level.upper()}",
+            f"*Risk Level:* {risk_indicator} ({risk.risk_level.upper()})",
             f"*Data Coverage:* {score.data_coverage * 100:.0f}%",
             "",
             "*Top Components:*",
@@ -78,7 +78,7 @@ class TelegramAlert:
             failed = [f for f in risk.flags if f.status == "fail"]
             if failed:
                 lines.append("")
-                lines.append("⚠️ *Risk Flags:*")
+                lines.append("*Risk Flags:*")
                 for flag in failed[:3]:
                     lines.append(f"• {flag.reason}")
 

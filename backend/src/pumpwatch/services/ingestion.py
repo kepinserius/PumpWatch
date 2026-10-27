@@ -140,7 +140,7 @@ class IngestionService:
             signal_id = await self.db.insert_signal(token_id, pool_id, score, risk, entry_price)
             if signal_id:
                 logger.info(
-                    f"✅ Signal created #{signal_id} untuk {sym}: "
+                    f"Signal created #{signal_id} untuk {sym}: "
                     f"score={score.total_score}, risk={risk.risk_level}"
                 )
         except Exception as e:

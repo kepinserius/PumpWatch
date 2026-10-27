@@ -103,9 +103,9 @@ const riskBadge = (level: string, hardBlock: boolean) => {
 };
 
 const flagStyle = (status: string) => {
-  if (status === 'pass') return { bg: '#0f2a1a', text: '#22c55e', icon: '✓' };
-  if (status === 'fail') return { bg: '#2a0f0f', text: '#ef4444', icon: '✕' };
-  return { bg: '#1c1c28', text: '#8b90a0', icon: '?' };
+  if (status === 'pass') return { bg: '#0f2a1a', text: '#22c55e', icon: 'PASS' };
+  if (status === 'fail') return { bg: '#2a0f0f', text: '#ef4444', icon: 'FAIL' };
+  return { bg: '#1c1c28', text: '#8b90a0', icon: 'N/A' };
 };
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -518,7 +518,7 @@ function TokenDetailPanel({ token }: { token: Token }) {
                 lineHeight: '1.5',
               }}
             >
-              ⚠️ Skor bukan probabilitas pump. Skor adalah ringkasan momentum berbasis rule — bukan rekomendasi beli.
+              WARNING: Skor bukan probabilitas pump. Skor adalah ringkasan momentum berbasis rule — bukan rekomendasi beli.
             </div>
           </>
         ) : (
@@ -613,7 +613,7 @@ export default function Home() {
               fontSize: '13px',
             }}
           >
-            ✕ Gagal memuat token — pastikan backend berjalan di localhost:8000
+            Gagal memuat token — pastikan backend berjalan di localhost:8000
           </div>
         ) : isLoading ? (
           <div style={{ color: '#555b6e', textAlign: 'center', padding: '64px' }}>

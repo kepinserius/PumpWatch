@@ -4,14 +4,14 @@ PumpWatch adalah scanner memecoin yang membantu mengidentifikasi perubahan aktiv
 
 ## Fitur MVP
 
-- ✅ **Solana-only** read-only scanner
-- ✅ **DexScreener integration** untuk market data
-- ✅ **Risk engine** dengan liquidity checks, data quality validation
-- ✅ **Momentum scoring** rule-based 6 komponen (0-100)
-- ✅ **Dashboard** Next.js dengan watchlist & price charts
-- ✅ **Telegram alerts** dengan cooldown & deduplication
-- ✅ **API endpoints** untuk tokens, scoring, snapshots
-- ✅ **Comprehensive tests** 28 tests passing
+- **Solana-only** read-only scanner
+- **DexScreener integration** untuk market data
+- **Risk engine** dengan liquidity checks, data quality validation
+- **Momentum scoring** rule-based 6 komponen (0-100)
+- **Dashboard** Next.js dengan watchlist & price charts
+- **Telegram alerts** dengan cooldown & deduplication
+- **API endpoints** untuk tokens, scoring, snapshots
+- **Comprehensive tests** 28 tests passing
 
 ## Tech Stack
 
