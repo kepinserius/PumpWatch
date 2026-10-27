@@ -69,8 +69,11 @@ class Database:
     async def insert_snapshot(
         self, data: MarketData, token_id: int | None, pool_id: int | None
     ) -> int | None:
+        import json
         if not self.pool:
             return None
+        # asyncpg expects jsonb as str, not dict
+        raw_data_str = json.dumps(data.raw_data) if isinstance(data.raw_data, dict) else data.raw_data
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -109,10 +112,11 @@ class Database:
                 data.sells_1h,
                 data.sells_6h,
                 data.sells_24h,
-                data.raw_data,
+                raw_data_str,
                 data.data_quality_status,
             )
             return row["id"] if row else None
+
 
     async def insert_signal(
         self,
@@ -122,8 +126,31 @@ class Database:
         risk: RiskAssessment,
         entry_price: float | None,
     ) -> int | None:
+        import json
         if not self.pool:
             return None
+
+        score_components = {
+            "components": [
+                {"name": c.name, "score": c.score, "weight": c.weight, "details": c.details}
+                for c in score.components
+            ],
+            "data_coverage": score.data_coverage,
+        }
+        risk_assessment = {
+            "risk_level": risk.risk_level,
+            "hard_block": risk.hard_block,
+            "flags": [
+                {"name": f.name, "status": f.status, "severity": f.severity, "reason": f.reason}
+                for f in risk.flags
+            ],
+            "coverage": risk.coverage,
+        }
+        # asyncpg expects jsonb as str, not dict
+        features_str = json.dumps(score.features) if isinstance(score.features, dict) else score.features
+        score_components_str = json.dumps(score_components)
+        risk_assessment_str = json.dumps(risk_assessment)
+
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -138,28 +165,9 @@ class Database:
                 pool_id,
                 datetime.now(UTC),
                 score.total_score,
-                {
-                    "components": [
-                        {"name": c.name, "score": c.score, "weight": c.weight, "details": c.details}
-                        for c in score.components
-                    ],
-                    "data_coverage": score.data_coverage,
-                },
-                score.features,
-                {
-                    "risk_level": risk.risk_level,
-                    "hard_block": risk.hard_block,
-                    "flags": [
-                        {
-                            "name": f.name,
-                            "status": f.status,
-                            "severity": f.severity,
-                            "reason": f.reason,
-                        }
-                        for f in risk.flags
-                    ],
-                    "coverage": risk.coverage,
-                },
+                score_components_str,
+                features_str,
+                risk_assessment_str,
                 score.rules_version,
                 entry_price,
             )
@@ -212,9 +220,10 @@ class Database:
                 """
                 SELECT 1 FROM tokens
                 WHERE chain = $1 AND address = $2
-                AND first_seen_at > NOW() - INTERVAL '%s hours'
+                AND first_seen_at > NOW() - make_interval(hours => $3)
                 """,
                 chain,
                 address,
+                since_hours,
             )
             return row is not None

@@ -3,8 +3,17 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from 'recharts';
 
+// ── Types ────────────────────────────────────────────────────────────────────
 interface Token {
   chain: string;
   address: string;
@@ -14,17 +23,30 @@ interface Token {
   snapshot_count: number;
 }
 
+interface ScoreComponent {
+  name: string;
+  score: number;
+  weight: number;
+}
+
+interface RiskFlag {
+  name: string;
+  status: 'pass' | 'fail' | 'unknown';
+  severity: string;
+  reason: string;
+}
+
 interface TokenScore {
   token: { chain: string; address: string };
   risk: {
     level: string;
     hard_block: boolean;
-    flags: Array<{ name: string; status: string; severity: string; reason: string }>;
+    flags: RiskFlag[];
     coverage: number;
   };
   momentum: {
     score: number;
-    components: Array<{ name: string; score: number; weight: number }>;
+    components: ScoreComponent[];
     data_coverage: number;
   };
 }
@@ -37,268 +59,696 @@ interface MarketSnapshot {
   volume_24h: string;
 }
 
+interface ProviderHealth {
+  status: string;
+  provider: string;
+}
+
+// ── API ──────────────────────────────────────────────────────────────────────
 const API_BASE = '/api/v1';
 
-async function fetchTokens(): Promise<Token[]> {
-  const res = await fetch(`${API_BASE}/tokens?limit=50`);
-  if (!res.ok) throw new Error('Failed to fetch tokens');
+const fetchJson = async <T,>(url: string): Promise<T> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const shortAddr = (addr: string, n = 6) =>
+  `${addr.slice(0, n)}…${addr.slice(-4)}`;
+
+const fmtDate = (iso?: string) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const scoreColor = (s: number) => {
+  if (s >= 80) return '#22c55e';
+  if (s >= 65) return '#4f8ef7';
+  if (s >= 40) return '#f59e0b';
+  return '#555b6e';
+};
+
+const riskBadge = (level: string, hardBlock: boolean) => {
+  if (hardBlock) return { label: 'BLOCKED', bg: '#3b1a1a', text: '#ef4444', dot: '#ef4444' };
+  if (level === 'low') return { label: 'LOW RISK', bg: '#0f2a1a', text: '#22c55e', dot: '#22c55e' };
+  if (level === 'medium') return { label: 'MEDIUM RISK', bg: '#2a1f0a', text: '#f59e0b', dot: '#f59e0b' };
+  return { label: 'HIGH RISK', bg: '#2a0f0f', text: '#ef4444', dot: '#ef4444' };
+};
+
+const flagStyle = (status: string) => {
+  if (status === 'pass') return { bg: '#0f2a1a', text: '#22c55e', icon: '✓' };
+  if (status === 'fail') return { bg: '#2a0f0f', text: '#ef4444', icon: '✕' };
+  return { bg: '#1c1c28', text: '#8b90a0', icon: '?' };
+};
+
+// ── Sub-components ───────────────────────────────────────────────────────────
+function NavBar({ providerHealth }: { providerHealth?: ProviderHealth }) {
+  const isHealthy = providerHealth?.status === 'healthy';
+  return (
+    <nav
+      style={{
+        background: '#141720',
+        borderBottom: '1px solid #252836',
+        padding: '0 24px',
+        height: '56px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        position: 'sticky',
+        top: 0,
+        zIndex: 100,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <span style={{ fontSize: '18px', fontWeight: 700, color: '#e8eaf0', letterSpacing: '-0.3px' }}>
+          PumpWatch
+        </span>
+        <span
+          style={{
+            fontSize: '11px',
+            color: '#555b6e',
+            background: '#1c1f2e',
+            padding: '2px 8px',
+            borderRadius: '4px',
+            fontWeight: 500,
+          }}
+        >
+          SOLANA
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <Link
+          href="/"
+          style={{
+            color: '#e8eaf0',
+            textDecoration: 'none',
+            fontSize: '13px',
+            fontWeight: 600,
+            borderBottom: '2px solid #4f8ef7',
+            paddingBottom: '2px',
+          }}
+        >
+          Watchlist
+        </Link>
+        <Link
+          href="/signals"
+          style={{ color: '#8b90a0', textDecoration: 'none', fontSize: '13px', fontWeight: 500 }}
+        >
+          Signals
+        </Link>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: '#1c1f2e',
+            padding: '4px 10px',
+            borderRadius: '6px',
+            fontSize: '12px',
+          }}
+        >
+          <span
+            style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: isHealthy ? '#22c55e' : '#f59e0b',
+              display: 'inline-block',
+            }}
+          />
+          <span style={{ color: '#8b90a0' }}>
+            {providerHealth?.provider ?? 'Provider'}
+          </span>
+          <span style={{ color: isHealthy ? '#22c55e' : '#f59e0b', fontWeight: 600 }}>
+            {providerHealth?.status ?? '…'}
+          </span>
+        </div>
+      </div>
+    </nav>
+  );
 }
 
-async function fetchTokenScore(chain: string, address: string): Promise<TokenScore> {
-  const res = await fetch(`${API_BASE}/tokens/${chain}/${address}/score`);
-  if (!res.ok) throw new Error('Failed to fetch score');
-  return res.json();
+function StatCard({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+}) {
+  return (
+    <div
+      style={{
+        background: '#141720',
+        border: '1px solid #252836',
+        borderRadius: '10px',
+        padding: '16px 20px',
+      }}
+    >
+      <div style={{ color: '#555b6e', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '8px' }}>
+        {label}
+      </div>
+      <div style={{ color: '#e8eaf0', fontSize: '22px', fontWeight: 700 }}>{value}</div>
+      {sub && <div style={{ color: '#555b6e', fontSize: '11px', marginTop: '4px' }}>{sub}</div>}
+    </div>
+  );
 }
 
-async function fetchSnapshots(chain: string, address: string): Promise<MarketSnapshot[]> {
-  const res = await fetch(`${API_BASE}/tokens/${chain}/${address}/snapshots`);
-  if (!res.ok) throw new Error('Failed to fetch snapshots');
-  return res.json();
+function EmptyState() {
+  return (
+    <div
+      style={{
+        textAlign: 'center',
+        padding: '64px 24px',
+        background: '#141720',
+        border: '1px solid #252836',
+        borderRadius: '12px',
+      }}
+    >
+      <div style={{ fontSize: '40px', marginBottom: '16px' }}>📡</div>
+      <div style={{ color: '#e8eaf0', fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>
+        Watchlist kosong
+      </div>
+      <div style={{ color: '#8b90a0', fontSize: '13px', lineHeight: '1.6', maxWidth: '360px', margin: '0 auto 20px' }}>
+        Database belum berisi token. Jalankan scan pertama untuk mulai menemukan token Solana.
+      </div>
+      <code
+        style={{
+          display: 'inline-block',
+          background: '#1c1f2e',
+          border: '1px solid #252836',
+          color: '#4f8ef7',
+          padding: '8px 16px',
+          borderRadius: '6px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+        }}
+      >
+        POST /api/v1/admin/scan
+      </code>
+      <div style={{ color: '#555b6e', fontSize: '11px', marginTop: '12px' }}>
+        Gunakan header <code style={{ color: '#8b90a0' }}>api_key</code> yang sesuai dengan config
+      </div>
+    </div>
+  );
 }
 
-async function fetchProviderHealth(): Promise<{ status: string; provider: string }> {
-  const res = await fetch(`${API_BASE}/providers/health`);
-  if (!res.ok) throw new Error('Failed to fetch provider health');
-  return res.json();
+function ScoreBar({ score, label }: { score: number; label: string }) {
+  const pct = Math.max(0, Math.min(100, score));
+  const color = scoreColor(pct);
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+        <span style={{ color: '#8b90a0', fontSize: '12px' }}>{label}</span>
+        <span style={{ color, fontWeight: 700, fontSize: '14px' }}>{pct}</span>
+      </div>
+      <div style={{ height: '4px', background: '#252836', borderRadius: '2px', overflow: 'hidden' }}>
+        <div
+          style={{
+            height: '100%',
+            width: `${pct}%`,
+            background: color,
+            borderRadius: '2px',
+            transition: 'width 0.4s ease',
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
+function TokenDetailPanel({ token }: { token: Token }) {
+  const { data: score, isLoading: scoreLoading } = useQuery({
+    queryKey: ['score', token.chain, token.address],
+    queryFn: () => fetchJson<TokenScore>(`${API_BASE}/tokens/${token.chain}/${token.address}/score`),
+  });
+
+  const { data: snapshots } = useQuery({
+    queryKey: ['snapshots', token.chain, token.address],
+    queryFn: () => fetchJson<MarketSnapshot[]>(`${API_BASE}/tokens/${token.chain}/${token.address}/snapshots`),
+  });
+
+  const risk = score?.risk;
+  const momentum = score?.momentum;
+  const badge = risk ? riskBadge(risk.level, risk.hard_block) : null;
+
+  const chartData = (snapshots ?? []).slice(-20).map((s) => ({
+    t: new Date(s.observed_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+    price: parseFloat(s.price_usd) || 0,
+  }));
+
+  return (
+    <div
+      style={{
+        background: '#141720',
+        border: '1px solid #252836',
+        borderRadius: '12px',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid #252836',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 700, fontSize: '16px', color: '#e8eaf0' }}>
+            {token.symbol ?? shortAddr(token.address)}
+          </div>
+          {token.name && (
+            <div style={{ color: '#8b90a0', fontSize: '12px', marginTop: '2px' }}>{token.name}</div>
+          )}
+        </div>
+        {badge && (
+          <div
+            style={{
+              background: badge.bg,
+              color: badge.text,
+              padding: '3px 8px',
+              borderRadius: '5px',
+              fontSize: '10px',
+              fontWeight: 700,
+              letterSpacing: '0.5px',
+            }}
+          >
+            {badge.label}
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: '20px' }}>
+        {scoreLoading ? (
+          <div style={{ color: '#555b6e', textAlign: 'center', padding: '24px' }}>Memuat skor…</div>
+        ) : score ? (
+          <>
+            {/* Momentum Score */}
+            <div style={{ marginBottom: '20px' }}>
+              <div
+                style={{
+                  color: '#555b6e',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.6px',
+                  marginBottom: '12px',
+                }}
+              >
+                Momentum Score
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  marginBottom: '12px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '40px',
+                    fontWeight: 800,
+                    color: scoreColor(momentum!.score),
+                    lineHeight: 1,
+                  }}
+                >
+                  {momentum!.score}
+                </div>
+                <div>
+                  <div style={{ color: '#8b90a0', fontSize: '12px' }}>
+                    {momentum!.score >= 80
+                      ? 'Momentum tinggi — review risiko'
+                      : momentum!.score >= 65
+                        ? 'Watchlist'
+                        : 'Di bawah threshold'}
+                  </div>
+                  <div style={{ color: '#555b6e', fontSize: '11px', marginTop: '2px' }}>
+                    Data coverage {(momentum!.data_coverage * 100).toFixed(0)}%
+                  </div>
+                </div>
+              </div>
+
+              {/* Score components */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {momentum!.components.map((c) => (
+                  <ScoreBar
+                    key={c.name}
+                    label={c.name.replace(/_/g, ' ')}
+                    score={Math.round(c.score * 100)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Risk Flags */}
+            {risk!.flags.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <div
+                  style={{
+                    color: '#555b6e',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.6px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  Risk Flags — coverage {(risk!.coverage * 100).toFixed(0)}%
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {risk!.flags.map((f, i) => {
+                    const s = flagStyle(f.status);
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          background: s.bg,
+                          borderRadius: '6px',
+                          padding: '8px 12px',
+                          display: 'flex',
+                          gap: '8px',
+                          alignItems: 'flex-start',
+                        }}
+                      >
+                        <span style={{ color: s.text, fontWeight: 700, fontSize: '12px', flexShrink: 0, marginTop: '1px' }}>
+                          {s.icon}
+                        </span>
+                        <div>
+                          <div style={{ color: s.text, fontWeight: 600, fontSize: '12px' }}>
+                            {f.name.replace(/_/g, ' ')}
+                          </div>
+                          <div style={{ color: '#8b90a0', fontSize: '11px', marginTop: '2px', lineHeight: '1.4' }}>
+                            {f.reason}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Price chart */}
+            {chartData.length > 1 && (
+              <div>
+                <div
+                  style={{
+                    color: '#555b6e',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.6px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  Harga ({chartData.length} snapshot terakhir)
+                </div>
+                <div style={{ height: '120px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#252836" />
+                      <XAxis dataKey="t" hide />
+                      <YAxis domain={['auto', 'auto']} hide />
+                      <Tooltip
+                        contentStyle={{
+                          background: '#1c1f2e',
+                          border: '1px solid #252836',
+                          borderRadius: '6px',
+                          color: '#e8eaf0',
+                          fontSize: '12px',
+                        }}
+                        formatter={(v: number) => [`$${v.toFixed(8)}`, 'Price']}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="price"
+                        stroke="#4f8ef7"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Disclaimer */}
+            <div
+              style={{
+                marginTop: '16px',
+                padding: '10px 12px',
+                background: '#1c1f2e',
+                borderRadius: '6px',
+                fontSize: '11px',
+                color: '#555b6e',
+                lineHeight: '1.5',
+              }}
+            >
+              ⚠️ Skor bukan probabilitas pump. Skor adalah ringkasan momentum berbasis rule — bukan rekomendasi beli.
+            </div>
+          </>
+        ) : (
+          <div style={{ color: '#555b6e', textAlign: 'center', padding: '24px' }}>
+            Gagal memuat data skor
+          </div>
+        )}
+
+        {/* Address */}
+        <div
+          style={{
+            marginTop: '16px',
+            paddingTop: '16px',
+            borderTop: '1px solid #252836',
+            color: '#555b6e',
+            fontSize: '11px',
+          }}
+        >
+          <div style={{ marginBottom: '4px' }}>
+            <span style={{ color: '#8b90a0' }}>Chain: </span>
+            {token.chain.toUpperCase()}
+          </div>
+          <div style={{ wordBreak: 'break-all' }}>
+            <span style={{ color: '#8b90a0' }}>Address: </span>
+            {token.address}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Home() {
-  const [selectedToken, setSelectedToken] = useState<Token | null>(null);
+  const [selected, setSelected] = useState<Token | null>(null);
 
-  const { data: tokens, isLoading: tokensLoading, error: tokensError } = useQuery({
+  const { data: tokens, isLoading, error } = useQuery({
     queryKey: ['tokens'],
-    queryFn: fetchTokens,
+    queryFn: () => fetchJson<Token[]>(`${API_BASE}/tokens?limit=50`),
     refetchInterval: 30000,
   });
 
   const { data: providerHealth } = useQuery({
     queryKey: ['providerHealth'],
-    queryFn: fetchProviderHealth,
+    queryFn: () => fetchJson<ProviderHealth>(`${API_BASE}/providers/health`),
     refetchInterval: 60000,
   });
 
-  const { data: score } = useQuery({
-    queryKey: ['score', selectedToken?.chain, selectedToken?.address],
-    queryFn: () => fetchTokenScore(selectedToken!.chain, selectedToken!.address),
-    enabled: !!selectedToken,
-  });
-
-  const { data: snapshots } = useQuery({
-    queryKey: ['snapshots', selectedToken?.chain, selectedToken?.address],
-    queryFn: () => fetchSnapshots(selectedToken!.chain, selectedToken!.address),
-    enabled: !!selectedToken,
-  });
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 65) return 'text-blue-600';
-    return 'text-gray-600';
-  };
-
-  const getRiskColor = (level: string) => {
-    if (level === 'low') return 'text-green-600 bg-green-100';
-    if (level === 'medium') return 'text-yellow-600 bg-yellow-100';
-    return 'text-red-600 bg-red-100';
-  };
+  const totalSnapshots = tokens?.reduce((sum, t) => sum + t.snapshot_count, 0) ?? 0;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
+    <div style={{ minHeight: '100vh', background: '#0d0f14' }}>
+      <NavBar providerHealth={providerHealth} />
+
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
+        {/* Stat bar */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: '12px',
+            marginBottom: '24px',
+          }}
+        >
+          <StatCard label="Tokens Tracked" value={tokens?.length ?? '—'} sub="dari scan terakhir" />
+          <StatCard label="Total Snapshots" value={totalSnapshots} sub="data pasar tersimpan" />
+          <StatCard
+            label="Last Update"
+            value={
+              tokens?.[0]?.last_seen
+                ? fmtDate(tokens[0].last_seen)
+                : '—'
+            }
+            sub="snapshot terbaru"
+          />
+          <StatCard
+            label="Data Provider"
+            value={providerHealth?.status ?? '—'}
+            sub={providerHealth?.provider ?? ''}
+          />
+        </div>
+
+        {/* Content */}
+        {error ? (
+          <div
+            style={{
+              padding: '24px',
+              background: '#2a0f0f',
+              border: '1px solid #3b1a1a',
+              borderRadius: '10px',
+              color: '#ef4444',
+              fontSize: '13px',
+            }}
+          >
+            ✕ Gagal memuat token — pastikan backend berjalan di localhost:8000
+          </div>
+        ) : isLoading ? (
+          <div style={{ color: '#555b6e', textAlign: 'center', padding: '64px' }}>
+            Memuat data…
+          </div>
+        ) : !tokens || tokens.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: selected ? '1fr 360px' : '1fr',
+              gap: '16px',
+              alignItems: 'start',
+            }}
+          >
+            {/* Token table */}
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">PumpWatch</h1>
-              <p className="text-sm text-gray-600">Memecoin Momentum & Risk Scanner</p>
-            </div>
-            <div className="flex gap-4 items-center">
-              <Link href="/signals" className="text-blue-600 hover:underline">
-                Signal History
-              </Link>
-              <div className="text-sm">
-                <span className="text-gray-600">Provider:</span>
-                <span
-                  className={`ml-2 px-2 py-1 rounded ${
-                    providerHealth?.status === 'healthy'
-                      ? 'text-green-600 bg-green-100'
-                      : 'text-yellow-600 bg-yellow-100'
-                  }`}
-                >
-                  {providerHealth?.status || 'Unknown'}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '12px',
+                }}
+              >
+                <h2 style={{ fontWeight: 600, fontSize: '15px', color: '#e8eaf0', margin: 0 }}>
+                  Watchlist
+                </h2>
+                <span style={{ color: '#555b6e', fontSize: '12px' }}>
+                  {tokens.length} token
                 </span>
               </div>
-            </div>
-          </div>
-        </div>
-      </header>
 
-      <main className="container mx-auto px-4 py-6">
-        {tokensError ? (
-          <div className="text-center py-12 bg-red-50 rounded-lg">
-            <p className="text-red-600">Failed to load tokens. Please check backend connection.</p>
-          </div>
-        ) : tokensLoading ? (
-          <div className="text-center py-12">Loading tokens...</div>
-        ) : !tokens || tokens.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg">
-            <p className="text-gray-600">No tokens in watchlist yet</p>
-            <p className="text-sm text-gray-500 mt-2">
-              Run a scan to discover tokens: POST /api/v1/admin/scan
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">Watchlist</h2>
-                <span className="text-sm text-gray-600">{tokens.length} tokens</span>
-              </div>
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Token</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Chain</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Updated</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Snapshots</th>
+              <div
+                style={{
+                  background: '#141720',
+                  border: '1px solid #252836',
+                  borderRadius: '12px',
+                  overflow: 'hidden',
+                }}
+              >
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#1c1f2e' }}>
+                      {['Token', 'Chain', 'Last Update', 'Snapshots'].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            padding: '10px 16px',
+                            textAlign: 'left',
+                            color: '#555b6e',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.6px',
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {tokens.map((token) => (
-                      <tr
-                        key={`${token.chain}/${token.address}`}
-                        className={`hover:bg-gray-50 cursor-pointer ${
-                          selectedToken?.address === token.address ? 'bg-blue-50' : ''
-                        }`}
-                        onClick={() => setSelectedToken(token)}
-                      >
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="font-medium text-gray-900">
-                            {token.symbol || token.address.slice(0, 8)}
-                          </div>
-                          {token.name && <div className="text-sm text-gray-500">{token.name}</div>}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-gray-600">{token.chain.toUpperCase()}</td>
-                        <td className="px-4 py-3 whitespace-nowrap text-gray-600">
-                          {token.last_seen ? new Date(token.last_seen).toLocaleString() : 'N/A'}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-gray-600">{token.snapshot_count}</td>
-                      </tr>
-                    ))}
+                  <tbody>
+                    {tokens.map((t, i) => {
+                      const isActive = selected?.address === t.address;
+                      return (
+                        <tr
+                          key={`${t.chain}/${t.address}`}
+                          onClick={() => setSelected(isActive ? null : t)}
+                          style={{
+                            background: isActive ? '#1a2035' : i % 2 === 0 ? '#141720' : '#131620',
+                            cursor: 'pointer',
+                            borderTop: '1px solid #1c1f2e',
+                            transition: 'background 0.15s',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isActive) (e.currentTarget as HTMLTableRowElement).style.background = '#1c1f2e';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isActive)
+                              (e.currentTarget as HTMLTableRowElement).style.background =
+                                i % 2 === 0 ? '#141720' : '#131620';
+                          }}
+                        >
+                          <td style={{ padding: '12px 16px' }}>
+                            <div style={{ fontWeight: 600, color: '#e8eaf0', fontSize: '13px' }}>
+                              {t.symbol ?? shortAddr(t.address)}
+                            </div>
+                            {t.name && (
+                              <div style={{ color: '#555b6e', fontSize: '11px', marginTop: '2px' }}>
+                                {t.name}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span
+                              style={{
+                                background: '#1c1f2e',
+                                color: '#8b90a0',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {t.chain.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', color: '#8b90a0', fontSize: '12px' }}>
+                            {fmtDate(t.last_seen)}
+                          </td>
+                          <td style={{ padding: '12px 16px', color: '#8b90a0', fontSize: '12px' }}>
+                            {t.snapshot_count}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+
+              {/* Stale data note */}
+              <div style={{ marginTop: '10px', color: '#555b6e', fontSize: '11px' }}>
+                Data di-refresh setiap 30 detik · Sumber: DexScreener · Skor dihitung live dari backend
+              </div>
             </div>
 
-            <div className="lg:col-span-1">
-              {selectedToken && score ? (
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h2 className="text-xl font-semibold mb-4">
-                    {selectedToken.symbol || 'Token Details'}
-                  </h2>
-
-                  <div className="mb-6">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-gray-600">Momentum Score</span>
-                      <span className={`text-2xl font-bold ${getScoreColor(score.momentum.score)}`}>
-                        {score.momentum.score}
-                      </span>
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      Data Coverage: {(score.momentum.data_coverage * 100).toFixed(0)}%
-                    </div>
-                  </div>
-
-                  <div className="mb-6">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-gray-600">Risk Level</span>
-                      <span className={`px-2 py-1 rounded text-sm font-medium ${getRiskColor(score.risk.level)}`}>
-                        {score.risk.level.toUpperCase()}
-                      </span>
-                    </div>
-                    {score.risk.hard_block && (
-                      <div className="text-sm text-red-600 font-medium">⚠️ Hard Blocked</div>
-                    )}
-                  </div>
-
-                  {score.momentum.components.length > 0 && (
-                    <div className="mb-6">
-                      <h3 className="font-medium mb-2">Score Components</h3>
-                      <div className="space-y-2">
-                        {score.momentum.components.map((comp) => (
-                          <div key={comp.name} className="flex justify-between text-sm">
-                            <span className="text-gray-600">{comp.name.replace('_', ' ')}</span>
-                            <span className="font-medium">{(comp.score * 100).toFixed(0)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {score.risk.flags.length > 0 && (
-                    <div className="mb-6">
-                      <h3 className="font-medium mb-2">Risk Flags</h3>
-                      <div className="space-y-1 text-sm">
-                        {score.risk.flags.map((flag, i) => (
-                          <div
-                            key={i}
-                            className={`px-2 py-1 rounded ${
-                              flag.status === 'pass'
-                                ? 'text-green-600 bg-green-50'
-                                : flag.status === 'fail'
-                                  ? 'text-red-600 bg-red-50'
-                                  : 'text-gray-600 bg-gray-50'
-                            }`}
-                          >
-                            <span className="font-medium">{flag.status.toUpperCase()}</span> - {flag.reason}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {snapshots && snapshots.length > 0 && (
-                    <div>
-                      <h3 className="font-medium mb-2">Price History (last {snapshots.length})</h3>
-                      <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={snapshots.slice(-20).map(s => ({
-                            ...s,
-                            price: parseFloat(s.price_usd)
-                          }))}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                            <XAxis dataKey="observed_at" hide />
-                            <YAxis domain={['auto', 'auto']} hide />
-                            <Tooltip
-                              contentStyle={{ backgroundColor: '#fff', borderRadius: '8px' }}
-                              itemStyle={{ color: '#3b82f6' }}
-                              formatter={(value: number) => [`$${value.toFixed(6)}`, 'Price']}
-                            />
-                            <Line type="monotone" dataKey="price" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="mt-6 pt-4 border-t text-xs text-gray-500">
-                    <div>Chain: {selectedToken.chain.toUpperCase()}</div>
-                    <div className="break-all">Address: {selectedToken.address}</div>
-                  </div>
-                </div>
-              ) : selectedToken ? (
-                <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
-                  Loading token details...
-                </div>
-              ) : (
-                <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
-                  Select a token to view details
-                </div>
-              )}
-            </div>
+            {/* Detail panel */}
+            {selected && <TokenDetailPanel token={selected} />}
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
+
+
