@@ -27,5 +27,9 @@ class Settings(BaseSettings):
     momentum_threshold: int = 65
     alert_cooldown_minutes: int = 60
 
+    # Background scanner
+    scan_interval_minutes: int = 5   # Scan otomatis setiap N menit (0 = nonaktif)
+    scan_on_startup: bool = True     # Scan langsung saat server start
+
 
 settings = Settings()
