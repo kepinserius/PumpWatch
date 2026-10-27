@@ -28,8 +28,20 @@ class Settings(BaseSettings):
     alert_cooldown_minutes: int = 60
 
     # Background scanner
-    scan_interval_minutes: int = 5   # Scan otomatis setiap N menit (0 = nonaktif)
-    scan_on_startup: bool = True     # Scan langsung saat server start
+    scan_interval_minutes: int = 5
+    scan_on_startup: bool = True
+
+    # Historical data archive
+    archive_interval_minutes: int = 60
+    archive_retention_days: int = 90
+
+    # Analytics aggregation
+    analytics_aggregation_interval_minutes: int = 60
+
+    # Backtest
+    backtest_default_fee_percent: float = 0.01
+    backtest_default_slippage_percent: float = 0.005
+    backtest_max_concurrent_runs: int = 2
 
 
 settings = Settings()

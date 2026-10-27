@@ -11,6 +11,7 @@ from pumpwatch.config import settings
 from pumpwatch.database import Database
 from pumpwatch.logging_config import setup_logging
 from pumpwatch.providers.dexscreener import DexScreenerAdapter
+from pumpwatch.services.archiver import DataArchiver
 from pumpwatch.services.ingestion import IngestionService
 
 setup_logging()
@@ -19,8 +20,10 @@ logger = logging.getLogger(__name__)
 db = Database(settings.database_url)
 provider = DexScreenerAdapter()
 ingestion = IngestionService(db, provider)
+archiver = DataArchiver(db)
 
 _scanner_task: asyncio.Task | None = None
+_archiver_task: asyncio.Task | None = None
 
 
 async def _background_scanner() -> None:
@@ -28,7 +31,7 @@ async def _background_scanner() -> None:
     Loop background yang scan token secara periodik.
     Jalan terus sampai server dimatikan.
     """
-    interval = settings.scan_interval_minutes * 60  # detik
+    interval = settings.scan_interval_minutes * 60
 
     if settings.scan_on_startup:
         logger.info("Background scanner: scan pertama saat startup...")
@@ -55,9 +58,35 @@ async def _background_scanner() -> None:
             logger.error(f"Scan periodik error (akan retry di interval berikutnya): {e}")
 
 
+async def _background_archiver() -> None:
+    """
+    Loop background yang archive momentum/risk scores secara periodik.
+    """
+    interval = settings.archive_interval_minutes * 60
+
+    if interval <= 0:
+        logger.info("Background archiver: ARCHIVE_INTERVAL_MINUTES=0, archiving dinonaktifkan")
+        return
+
+    logger.info(f"Background archiver: akan archive setiap {settings.archive_interval_minutes} menit")
+    await asyncio.sleep(interval)
+
+    while True:
+        logger.info("Background archiver: memulai archiving...")
+        try:
+            count = await archiver.archive_current_scores()
+            logger.info(f"Archiving selesai: {count} tokens archived, next in {settings.archive_interval_minutes}m")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Archiving error (akan retry di interval berikutnya): {e}")
+
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _scanner_task
+    global _scanner_task, _archiver_task
 
     # ── Startup ──────────────────────────────────────────────────
     await db.connect()
@@ -66,7 +95,10 @@ async def lifespan(app: FastAPI):
     _scanner_task = asyncio.create_task(_background_scanner())
     logger.info("Background scanner task started")
 
-    yield  # aplikasi berjalan
+    _archiver_task = asyncio.create_task(_background_archiver())
+    logger.info("Background archiver task started")
+
+    yield
 
     # ── Shutdown ─────────────────────────────────────────────────
     if _scanner_task and not _scanner_task.done():
@@ -77,12 +109,23 @@ async def lifespan(app: FastAPI):
             pass
         logger.info("Background scanner task stopped")
 
+    if _archiver_task and not _archiver_task.done():
+        _archiver_task.cancel()
+        try:
+            await _archiver_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Background archiver task stopped")
+
     await db.disconnect()
     logger.info("Application stopped")
 
 
 app = FastAPI(title="PumpWatch API", version="0.1.0", lifespan=lifespan)
 app.include_router(router, prefix="/api/v1")
+
+from pumpwatch.api.archiver_router import router as archiver_router
+app.include_router(archiver_router, prefix="/api/v1", tags=["archiver"])
 
 
 @app.get("/health")
@@ -107,11 +150,19 @@ async def ready() -> dict[str, Any]:
     elif _scanner_task.done():
         scanner_status = "stopped"
 
+    archiver_status = "running"
+    if _archiver_task is None:
+        archiver_status = "not_started"
+    elif _archiver_task.done():
+        archiver_status = "stopped"
+
     return {
         "status": "ready" if db_status == "connected" else "degraded",
         "database": db_status,
         "scanner": scanner_status,
+        "archiver": archiver_status,
         "scan_interval_minutes": settings.scan_interval_minutes,
+        "archive_interval_minutes": settings.archive_interval_minutes,
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
