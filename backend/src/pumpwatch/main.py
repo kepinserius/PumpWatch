@@ -12,7 +12,7 @@ from pumpwatch.database import Database
 from pumpwatch.logging_config import setup_logging
 from pumpwatch.providers.dexscreener import DexScreenerAdapter
 from pumpwatch.services.archiver import DataArchiver
-from pumpwatch.services.ingestion import IngestionService
+from pumpwatch.services.ingestion import IngestionService, init_alert_manager
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -92,6 +92,9 @@ async def lifespan(app: FastAPI):
     await db.connect()
     logger.info("Database connected")
 
+    init_alert_manager(db)
+    logger.info("AlertManager initialized")
+
     _scanner_task = asyncio.create_task(_background_scanner())
     logger.info("Background scanner task started")
 
@@ -126,6 +129,9 @@ app.include_router(router, prefix="/api/v1")
 
 from pumpwatch.api.archiver_router import router as archiver_router
 app.include_router(archiver_router, prefix="/api/v1", tags=["archiver"])
+
+from pumpwatch.api.alert_rules_router import router as alert_rules_router
+app.include_router(alert_rules_router, prefix="/api/v1", tags=["alert-rules"])
 
 
 @app.get("/health")

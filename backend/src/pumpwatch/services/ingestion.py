@@ -5,6 +5,7 @@ from pumpwatch.config import settings
 from pumpwatch.database import Database
 from pumpwatch.domain.models import MarketData, TokenInfo
 from pumpwatch.providers.dexscreener import DexScreenerAdapter
+from pumpwatch.services.alert_manager import AlertManager
 from pumpwatch.services.risk import RiskEngine
 from pumpwatch.services.scoring import MomentumEngine
 
@@ -12,6 +13,13 @@ logger = logging.getLogger(__name__)
 
 _momentum_engine = MomentumEngine()
 _risk_engine = RiskEngine()
+_alert_manager: AlertManager | None = None
+
+
+def init_alert_manager(db: Database) -> None:
+    """Initialize AlertManager (dipanggil saat startup)."""
+    global _alert_manager
+    _alert_manager = AlertManager(db)
 
 
 class IngestionService:
@@ -143,6 +151,7 @@ class IngestionService:
                     f"Signal created #{signal_id} untuk {sym}: "
                     f"score={score.total_score}, risk={risk.risk_level}"
                 )
+                await self._check_alert_rules(market_data, token_id, pool_id, score, risk)
         except Exception as e:
             logger.error(f"Signal generation error untuk {market_data.token_address}: {e}")
 
@@ -232,3 +241,91 @@ class IngestionService:
 
         data.data_quality_status = "valid"
         return True
+    async def _check_alert_rules(
+        self,
+        market_data: MarketData,
+        token_id: int,
+        pool_id: int | None,
+        score: MomentumScore,
+        risk: RiskAssessment,
+    ) -> None:
+        """
+        Check alert rules dan kirim alert jika triggered.
+        Dipanggil setelah signal dibuat.
+        """
+        if not _alert_manager:
+            logger.debug("AlertManager not initialized, skipping alert check")
+            return
+
+        try:
+            triggered_rules = await _alert_manager.check_alert_conditions(
+                token_id, pool_id, score, risk
+            )
+
+            if not triggered_rules:
+                logger.debug(f"No alert rules triggered for token_id={token_id}")
+                return
+
+            logger.info(f"{len(triggered_rules)} alert rules triggered for token_id={token_id}")
+
+            for rule in triggered_rules:
+                can_send = await _alert_manager.should_send_alert(token_id, pool_id, rule)
+                if not can_send:
+                    logger.debug(
+                        f"Alert rule {rule['name']} in cooldown for token_id={token_id}"
+                    )
+                    continue
+
+                await self._send_alert_for_rule(
+                    market_data, token_id, score, risk, rule
+                )
+                await _alert_manager.record_alert_sent(token_id, pool_id, rule)
+                logger.info(
+                    f"Alert sent for rule '{rule['name']}' (priority={rule['priority']})"
+                )
+
+        except Exception as e:
+            logger.error(f"Error checking alert rules: {e}")
+
+    async def _send_alert_for_rule(
+        self,
+        market_data: MarketData,
+        token_id: int,
+        score: MomentumScore,
+        risk: RiskAssessment,
+        rule: dict,
+    ) -> None:
+        """Send Telegram alert dengan info rule."""
+        from pumpwatch.services.alerts import TelegramAlert
+
+        telegram = TelegramAlert()
+
+        priority_prefix = ""
+        if rule["priority"] == "high":
+            priority_prefix = "HIGH PRIORITY - "
+        elif rule["priority"] == "low":
+            priority_prefix = "[Low Priority] "
+
+        try:
+            message = self._format_alert_message(
+                market_data, score, risk, rule, priority_prefix
+            )
+            await telegram.send_alert(
+                market_data.token_address,
+                market_data.chain,
+                score,
+                risk,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send Telegram alert: {e}")
+
+    def _format_alert_message(
+        self,
+        market_data: MarketData,
+        score: MomentumScore,
+        risk: RiskAssessment,
+        rule: dict,
+        priority_prefix: str,
+    ) -> str:
+        """Format alert message dengan rule info."""
+        return f"{priority_prefix}Alert triggered by rule: {rule['name']}"
